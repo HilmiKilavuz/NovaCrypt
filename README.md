@@ -1,113 +1,119 @@
-# NovaCrypt
+# NovaCrypt Project
 
-NovaCrypt is a custom symmetric encryption algorithm implementation in Python, designed for educational purposes to demonstrate the fundamental concepts of cryptography, such as Substitution-Permutation Networks (SPN), S-Boxes, and P-Boxes.
+NovaCrypt is a custom symmetric encryption algorithm implementation in Python, designed specifically for **educational purposes**. It demonstrates fundamental concepts of modern cryptography, such as Substitution-Permutation Networks (SPN), S-Boxes (Substitution Boxes), and P-Boxes (Permutation Boxes).
+
+The project also includes `SecureNovaCrypt`, an extension implementing a Time-Based One-Time Password (TOTP) generator tailored for key exchange or authentication simulations.
 
 > [!WARNING]
-> **Educational Use Only**: This algorithm is designed for learning and experimentation. It is **NOT** intended for securing sensitive or production data. Standard algorithms like AES (Advanced Encryption Standard) should be used for real-world security needs.
+> **EDUCATIONAL USE ONLY**
+> This algorithm is **NOT SECURE** for production use.
+> *   **Linear S-Box**: The substitution logic is mathematically linear ($3x + 7$), making it vulnerable to linear cryptanalysis.
+> *   **Weak Key Schedule**: The key is simply repeated, offering poor resistance against related-key attacks.
+> *   **Limited Block Mode**: The current implementation only encrypts the *first 16 bytes* of data.
+> *   **Zero Padding**: Uses non-standard zero padding which can be ambiguous.
+>
+> For real-world data protection, use established standards like **AES (Advanced Encryption Standard)**.
 
-## Features
+## Project Structure
 
-*   **Symmetric Encryption**: Uses the same key for both encryption and decryption.
-*   **Block Cipher**: Operates on fixed-size blocks of 16 bytes.
-*   **SPN Architecture**: Implements a Substitution-Permutation Network structure.
-*   **Custom S-Box**: A mathematical substitution box defined by $f(x) = (3x + 7) \mod 256$.
-*   **P-Box**: A simple permutation step involving byte rotation.
-*   **Avalanche Effect**: Demonstrates high sensitivity to key changes (a single bit change in the key drastically alters the output).
+*   `NovaCrypt.ipynb`: Jupyter Notebook containing the source code, class definitions, and test scenarios.
+*   `README.md`: This documentation file.
 
-## Algorithm Details
+---
 
-The encryption process consists of 4 rounds involving the following operations:
+## Code Review & Architecture Analysis
 
-1.  **Key Mixing (XOR)**: The data block is XORed with the round key.
-2.  **Substitution (S-Box)**: Each byte is substituted using the function:
-    $$S(x) = (3x + 7) \mod 256$$
-    The inverse S-Box for decryption is derived as:
-    $$S^{-1}(y) = 171 \times (y - 7) \mod 256$$
-3.  **Permutation (P-Box)**: The bytes in the block are shifted/rotated to diffuse bits across the block.
+Methods and classes have been reviewed to understand the internal mechanisms. Below is a breakdown of the architecture:
 
-## usage
+### 1. `NovaCrypt` Class (Base Cipher)
 
-### Installation
+This class implements a simplified SPN block cipher.
 
-No external libraries are required. The implementation relies only on Python's standard library.
+*   **Block Size**: 16 Bytes (128 bits).
+*   **Rounds**: 4 Rounds.
+*   **Key Schedule**:
+    *   *Implementation*: `anahtar_uret` repeats the password bytes to fill the block size.
+    *   *Critique*: Extremely simple. Does not provide sufficient "avalanche effect" for the key itself across rounds.
+*   **S-Box (Substitution)**:
+    *   *Formula*: $S(x) = (3x + 7) \mod 256$
+    *   *inverse*: $S^{-1}(y) = 171 \times (y - 7) \mod 256$
+    *   *Critique*: This is an affine transformation, which is linear. A strong S-Box must be non-linear to resist linear cryptanalysis.
+*   **P-Box (Permutation)**:
+    *   *Implementation*: Rotates bytes left (encryption) or right (decryption).
+    *   *Critique*: Provides diffusion, but simple rotation is less effective than bit-level permutations used in DES or AES.
+*   **Encryption Loop**:
+    1.  **XOR** with Key.
+    2.  **Substitute** (S-Box).
+    3.  **Permute** (P-Box) (except in the last round).
 
-### Example Code
+### 2. `SecureNovaCrypt` Class (OTP Extension)
 
-Here is how to use the `NovaCrypt` class to encrypt and decrypt messages.
+Inherits from `NovaCrypt` to demonstrate a stronger variant for OTP generation.
+
+*   **Improvements**:
+    *   **Complex S-Box**: uses `(i * 31 + 17) ^ 0x63` to add some non-linearity via XOR.
+    *   **More Rounds**: Increases rounds from 4 to 8.
+*   **OTP Mechanism**:
+    *   Uses system time (`time.time() / 30`) as the message seed (30-second window).
+    *   Packs time into 8 bytes (`struct.pack('>q')`) and pads with `0x55`.
+    *   Encrypts this time-block using a secret key.
+    *   **Dynamic Truncation**: Extracts a 4-byte integer from the encrypted block based on the last byte's value (similar to HMAC-based OTP).
+    *   Returns a 6-digit code.
+
+---
+
+## Usage Guide
+
+### Prerequisites
+*   Python 3.x
+*   No external libraries are required (uses standard `hashlib`, `time`, `struct`).
+
+### Basic Encryption (NovaCrypt)
 
 ```python
-import binascii
-
-# Import the class (assuming existing code structure)
-# from novacrypt import NovaCrypt 
-
-# Or define the class as in the notebook...
-class NovaCrypt:
-    def __init__(self):
-        self.block_size = 16 
-        self.sbox = [(3 * i + 7) % 256 for i in range(256)]
-        self.inv_sbox = [(171 * (i - 7)) % 256 for i in range(256)]
-
-    def anahtar_uret(self, parola):
-        p_bytes = parola.encode('utf-8')
-        return (p_bytes * (16 // len(p_bytes) + 1))[:16]
-
-    def _p_box(self, block, reverse=False):
-        if not reverse:
-            return block[1:] + block[:1]
-        return block[-1:] + block[:-1]
-
-    def sifrele(self, duz_metin, anahtar):
-        if isinstance(duz_metin, str):
-            duz_metin = duz_metin.encode('utf-8')
-        data = duz_metin.ljust(self.block_size, b'\0')
-        state = bytearray(data[:16])
-        for i in range(4):
-            state = bytearray(a ^ b for a, b in zip(state, anahtar))
-            state = bytearray(self.sbox[b] for b in state)
-            if i < 3:
-                state = self._p_box(state)
-        return bytes(state)
-
-    def desifrele(self, sifreli_metin, anahtar):
-        state = bytearray(sifreli_metin)
-        for i in reversed(range(4)):
-            if i < 3:
-                state = self._p_box(state, reverse=True)
-            state = bytearray(self.inv_sbox[b] for b in state)
-            state = bytearray(a ^ b for a, b in zip(state, anahtar))
-        return bytes(state).rstrip(b'\0')
-
-# --- Usage Example ---
-
-# 1. Initialize
+# Assuming NovaCrypt class is defined (copy from NovaCrypt.ipynb)
 nc = NovaCrypt()
+key = nc.anahtar_uret("my_secret_password")
 
-# 2. Generate Key
-password = "super_secret_password"
-key = nc.anahtar_uret(password)
+# Encryption
+plaintext = "Hello World!"
+ciphertext = nc.sifrele(plaintext, key)
+print(f"Ciphertext (Hex): {ciphertext.hex()}")
 
-# 3. Encrypt
-message = "Hello NovaCrypt!"
-encrypted_bytes = nc.sifrele(message, key)
-print(f"Encrypted (Hex): {encrypted_bytes.hex()}")
-
-# 4. Decrypt
-decrypted_bytes = nc.desifrele(encrypted_bytes, key)
-print(f"Decrypted: {decrypted_bytes.decode('utf-8')}")
+# Decryption
+decrypted = nc.desifrele(ciphertext, key)
+print(f"Decrypted: {decrypted.decode()}")
 ```
 
-### Key Sensitivity Test (Avalanche Effect)
+> [!IMPORTANT]
+> The encryption method `sifrele` only processes the first 16 bytes of the input string due to the line `state = bytearray(data[:16])`. Input longer than 16 bytes will be truncated!
 
-The algorithm demonstrates that even a slight change in the key produces a completely different result, effectively preventing similar keys from decrypting the same ciphertext.
+### Time-Based OTP (SecureNovaCrypt)
+
+This simulates a Google Authenticator-style OTP generator.
 
 ```python
-# Create a faulty key with just 1 bit difference
-faulty_key = bytearray(key)
-faulty_key[0] ^= 1 
+import time
 
-# Attempt decryption
-decrypted_faulty = nc.desifrele(encrypted_bytes, bytes(faulty_key))
-print(f"Decrypted with faulty key: {decrypted_faulty.hex()}") 
-# Result will be random/garbled bytes
+# Initialize
+secure_nc = SecureNovaCrypt()
+shared_secret = "company_master_key"
+
+# Generate Code
+otp = secure_nc.generate_otp(shared_secret)
+remaining_seconds = 30 - (int(time.time()) % 30)
+
+print(f"Current OTP: {otp}")
+print(f"Valid for: {remaining_seconds} seconds")
 ```
+
+## Security Vulnerability Details
+
+For students and developers reviewing this code, pay attention to these specific vulnerabilities:
+
+1.  **ECB Mode limitation**: The cipher encrypts a single block. It does not implement chaining modes (CBC, GCM) required for messages longer than one block.
+2.  **Padding Oracle**: The `ljust` zero-padding does not indicate the original length of the message. If the message ends with null bytes, they will be lost upon `rstrip(b'\0')`.
+3.  **Fixed S-Box**: In a real-world scenario, S-Boxes are carefully constructed to minimize differential and linear probability. The formula-based S-Box here is predictable.
+
+---
+*Generated by Antigravity Review Assistant*
